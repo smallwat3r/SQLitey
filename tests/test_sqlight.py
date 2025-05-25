@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 from pytest import fixture, raises
 
-from sqlight import Db, DbConfig, Sql, dict_factory, namedtuple_factory
+from sqlight import Db, DbPathConfig, Sql, dict_factory, namedtuple_factory
 
 
 @fixture
@@ -23,7 +23,7 @@ def temp_db_path():
 
 @fixture
 def config(temp_db_path):
-    return DbConfig(
+    return DbPathConfig(
         database=temp_db_path,
         sql_templates_dir=Path(__file__).resolve().parent / "sql"
     )

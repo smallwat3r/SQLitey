@@ -7,7 +7,7 @@ from typing import Any, Callable, Protocol, Self, TypeAlias, runtime_checkable
 
 
 @dataclass(frozen=True)
-class DbConfig:
+class DbPathConfig:
     """Database path configurations."""
 
     # database filepath
@@ -112,7 +112,7 @@ class Db:
         self._sql_templates_dir = sql_templates_dir
 
     @classmethod
-    def from_config(cls, config: DbConfig, **kwargs) -> Self:
+    def from_config(cls, config: DbPathConfig, **kwargs) -> Self:
         return cls(
             config.database,
             sql_templates_dir=config.sql_templates_dir,

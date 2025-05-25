@@ -5,11 +5,11 @@ Still a WIP...
 SQLite nano framework.
 
 ``` python
-from sqlight import Db, DbConfig, Sql, namedtuple_factory
+from sqlight import Db, DbPathConfig, Sql, namedtuple_factory
 
 dir = Path(__file__).resolve().parent
 
-config = DbConfig(
+config = DbPathConfig(
     database=dir / "db.sqlite3"
     sql_templates_dir=dir / "sql"
 )
