@@ -79,18 +79,18 @@ class Db:
     def __exit__(self, *args, **kwargs) -> None:
         self.conn.close()
 
-    def _execute(self, sql: Sql, *args) -> SqlRow:
+    def execute(self, sql: Sql, *args) -> SqlRow:
         if hasattr(sql, "template") and not hasattr(sql, "path"):
             # path is deferred, lets set it from the config
             sql.path = self._config.sql_templates_dir
         return self.cursor.execute(sql.query, *args)
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:
-        return self._execute(sql, *args).fetchone()
+        return self.execute(sql, *args).fetchone()
 
     def fetchall(self, sql: Sql, *args) -> list[SqlRow]:
-        return self._execute(sql, *args).fetchall()
+        return self.execute(sql, *args).fetchall()
 
     def commit(self, sql: Sql, *args) -> None:
-        self._execute(sql, *args)
+        self.execute(sql, *args)
         self.conn.commit()
