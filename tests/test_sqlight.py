@@ -1,5 +1,5 @@
-import sqlite3
 import re
+import sqlite3
 from pathlib import Path
 from sqlite3.dbapi2 import OperationalError
 from tempfile import NamedTemporaryFile
