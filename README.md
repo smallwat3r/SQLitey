@@ -18,6 +18,6 @@ with Db(config, row_factory=namedtuple_factory) as db:
     result = db.fetchone(Sql.template("get_user_by_id.sql"), (3,))
     print(result.id, result.name)
 
-ith Db(config) as db:
+with Db(config) as db:
     db.commit(Sql.raw("INSERT INTO users VALUES (10, 'John');"))
 ```
