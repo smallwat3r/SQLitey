@@ -8,8 +8,12 @@ from typing import Any, Callable, Protocol, Self, TypeAlias, runtime_checkable
 
 @dataclass(frozen=True)
 class DbConfig:
+    """Database path configurations."""
+
+    # database filepath
     database: Path
-    sql_templates_dir: Path
+    # directory storing sql templates
+    sql_templates_dir: Path | None = None
 
 
 @lru_cache
@@ -29,6 +33,8 @@ class _SqlTemplateProtocol(Protocol):
 
 
 class Sql:
+    """Represent a SQL query."""
+
     def __new__(cls, *args, **kwargs):
         raise TypeError("Direct instantiation is not allowed, use a classmethod.")
 
@@ -37,7 +43,7 @@ class Sql:
         if isinstance(self, _SqlTemplateProtocol):
             # path should always be set if we read from a template
             if not hasattr(self, "path"):
-                raise ValueError("No path config supplied")
+                raise ValueError("No template path configured")
             return self._query(self.filename, getattr(self, "path"))
         assert isinstance(self, _SqlRawProtocol)
         return self._query()
@@ -87,6 +93,8 @@ class _SafeCursor:
 
 
 class Db:
+    """SQLite wrapper class."""
+
     def __init__(
         self,
         *args,

@@ -44,7 +44,7 @@ def test_raw_sql():
 def test_template_sql_no_path_config():
     """Test loading a template without a path."""
     sql = Sql.template("test.sql")
-    with raises(ValueError, match="No path config supplied"):
+    with raises(ValueError, match="No template path configured"):
         sql.query
 
 
