@@ -51,7 +51,7 @@ class Sql:
     @classmethod
     def template(cls, filename: str, *, path: Path | None = None) -> Self:
         self = object.__new__(cls)
-        setattr(self, "_query",  _read_sql_template)
+        setattr(self, "_query", _read_sql_template)
         setattr(self, "filename", filename)
         # can also deferred from the config if not specified here
         if path:
