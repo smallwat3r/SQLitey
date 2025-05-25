@@ -8,7 +8,7 @@ from typing import Any, Callable, Self, TypeAlias
 
 @dataclass(frozen=True)
 class DbConfig:
-    db_file: Path
+    database: Path
     sql_templates_dir: Path
 
 
@@ -66,12 +66,26 @@ def namedtuple_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
 
 
 class Db:
-    def __init__(self, config: DbConfig, row_factory: Callable | None = None, *args, **kwargs) -> None:
-        self._config = config
-        self.conn = sqlite3.connect(config.db_file, *args, **kwargs)
+    def __init__(
+        self,
+        *args,
+        row_factory: Callable | None = None,
+        sql_templates_dir: Path | None = None,
+        **kwargs,
+    ) -> None:
+        self.conn = sqlite3.connect(*args, **kwargs)
         if row_factory:
             self.conn.row_factory = row_factory
         self.cursor = self.conn.cursor()
+        self._sql_templates_dir = sql_templates_dir
+
+    @classmethod
+    def from_config(cls, config: DbConfig, **kwargs) -> Self:
+        return cls(
+            config.database,
+            sql_templates_dir=config.sql_templates_dir,
+            **kwargs,
+        )
 
     def __enter__(self) -> Self:
         return self
@@ -82,7 +96,7 @@ class Db:
     def execute(self, sql: Sql, *args) -> SqlRow:
         if hasattr(sql, "template") and not hasattr(sql, "path"):
             # path is deferred, lets set it from the config
-            sql.path = self._config.sql_templates_dir
+            sql.path = self._sql_templates_dir
         return self.cursor.execute(sql.query, *args)
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:
