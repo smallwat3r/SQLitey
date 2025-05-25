@@ -1,3 +1,5 @@
+SRC = sqlight
+
 .PHONY: help
 help:  ## Show this help menu
 	@echo "Usage: make [TARGET ...]"
@@ -19,8 +21,16 @@ venv: $(VENV_PYTHON)  ## Create a Python virtual environment
 
 .PHONY: deps
 deps:  ## Install requirements in virtual environment
-	$(PYTHON) -m pip install -r requirements.dev.txt
+	$(PYTHON) -m pip install uv
 
 .PHONY: tests
 tests:  ## Run unit tests
-	$(PYTHON) -m pytest tests
+	$(PYTHON) -m uv run pytest --cov=$(SRC) --cov-report term-missing tests
+
+.PHONY: ruff
+ruff:  ## Run ruff
+	$(PYTHON) -m uv run ruff check $(SRC)
+
+.PHONY: black
+black:  ## Run black
+	$(PYTHON) -m uv run black $(SRC)

@@ -28,28 +28,33 @@ def config(temp_db_path):
 
 
 def test_sql_direct_instantiation():
+    """Test using Sql without a classmethod."""
     with raises(TypeError, match="Direct instantiation is not allowed"):
         Sql(...)
 
 
 def test_raw_sql():
+    """Test loading raw SQL."""
     sql = Sql.raw("SELECT 1;")
     assert sql.query == "SELECT 1;"
 
 
 def test_template_sql_no_path_config():
+    """Test loading a template without a path."""
     sql = Sql.template("test.sql")
     with raises(ValueError, match="No path config supplied"):
         sql.query
 
 
 def test_template_sql():
+    """Test loading a template."""
     sql = Sql.template("test.sql")
     sql.path = Path(__file__).resolve().parent / "sql"
     assert sql.query == "SELECT 1;"
 
 
 def test_db_fetchone(config):
+    """Test using fetchone."""
     sql = Sql.raw("SELECT id, name FROM users WHERE id = ?;")
     with Db.from_config(config) as db:
         result = db.fetchone(sql, (1,))
@@ -57,6 +62,7 @@ def test_db_fetchone(config):
 
 
 def test_db_fetchone_dict_factory(config):
+    """Test using fetchone and the dict factory."""
     sql = Sql.raw("SELECT id, name FROM users WHERE id = ?;")
     with Db.from_config(config, row_factory=dict_factory) as db:
         result = db.fetchone(sql, (1,))
@@ -64,6 +70,7 @@ def test_db_fetchone_dict_factory(config):
 
 
 def test_db_fetchone_namedtuple_factory(config):
+    """Test using fetchone and the namedtuple factory."""
     sql = Sql.raw("SELECT id, name FROM users WHERE id = ?;")
     with Db.from_config(config, row_factory=namedtuple_factory) as db:
         result = db.fetchone(sql, (1,))
@@ -72,6 +79,7 @@ def test_db_fetchone_namedtuple_factory(config):
 
 
 def test_db_fetchall(config):
+    """Test using fetchall."""
     sql = Sql.raw("SELECT id, name FROM users;")
     with Db.from_config(config) as db:
         results = db.fetchall(sql)
@@ -79,6 +87,7 @@ def test_db_fetchall(config):
 
 
 def test_db_fetchall_dict_factory(config):
+    """Test using fetchall and the dict factory."""
     sql = Sql.raw("SELECT id, name FROM users;")
     with Db.from_config(config, row_factory=dict_factory) as db:
         results = db.fetchall(sql)
@@ -86,6 +95,7 @@ def test_db_fetchall_dict_factory(config):
 
 
 def test_db_fetchall_namedtuple_factory(config):
+    """Test using fetchall and the namedtuple factory."""
     sql = Sql.raw("SELECT id, name FROM users;")
     with Db.from_config(config, row_factory=namedtuple_factory) as db:
         results = db.fetchall(sql)
@@ -96,7 +106,16 @@ def test_db_fetchall_namedtuple_factory(config):
 
 
 def test_db_commit(config):
+    """Test using commit."""
     with Db.from_config(config, row_factory=namedtuple_factory) as db:
         db.commit(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
         result = db.fetchone(Sql.raw("SELECT COUNT(id) as total FROM users;"))
     assert result.total == 3
+
+
+def test_db_undefer_template_path(temp_db_path):
+    """Test setting template path not using a config."""
+    sql = Sql.template("test.sql", path=Path(__file__).resolve().parent / "sql")
+    with Db(temp_db_path) as db:
+        result = db.fetchone(sql)
+    assert result == (1,)

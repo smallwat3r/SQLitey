@@ -43,11 +43,11 @@ class Sql:
         return self
 
     @classmethod
-    def template(cls, filename: str, path: Path | None = None) -> Self:
+    def template(cls, filename: str, *, path: Path | None = None) -> Self:
         self = object.__new__(cls)
         self._query = _get_sql_template
         self.filename = filename
-        # we can also defer this if required
+        # can also deferred from the config if not specified here
         if path:
             self.path = path
         return self
@@ -58,10 +58,7 @@ RowFactory: TypeAlias = Callable[[sqlite3.Cursor, sqlite3.Row], SqlRow]
 
 
 def dict_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
-    return {
-        col[0]: row[idx]
-        for idx, col in enumerate(cursor.description)
-    }
+    return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
 
 def namedtuple_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:

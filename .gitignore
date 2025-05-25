@@ -1,0 +1,7 @@
+*.DS_Store
+.coverage
+.venv/
+build/
+dist/
+sqlight.egg-info/
+.mypy_cache/

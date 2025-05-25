@@ -1,0 +1,15 @@
+[project]
+name = "sqlight"
+version = "0.1.0"
+description = "SQLite nano framework"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "ruff>=0.11.11",
+]

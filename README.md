@@ -2,7 +2,7 @@
 
 Still a WIP...
 
-Useful wrappers around `sqlite3`.
+SQLite nano framework.
 
 ``` python
 from sqlight import Db, DbConfig, Sql, namedtuple_factory
