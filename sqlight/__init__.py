@@ -73,7 +73,7 @@ class Db:
     def __init__(
         self,
         *args,
-        row_factory: Callable[[sqlite3.Cursor, sqlite3.Row], SqlRow] | None = None,
+        row_factory: RowFactory | None = None,
         sql_templates_dir: Path | None = None,
         **kwargs,
     ) -> None:
