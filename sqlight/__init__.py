@@ -3,7 +3,7 @@ from collections import namedtuple
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Self, TypeAlias
+from typing import Any, Callable, Protocol, Self, TypeAlias, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -17,39 +17,45 @@ def _read_sql_template(filename: str, path: Path) -> str:
     return (path / filename).read_text().strip()
 
 
-class Sql:
-    # possible attrs this object can hold
+@runtime_checkable
+class _SqlRawProtocol(Protocol):
     _query: Callable
-    path: Path | None
-    filename: str | None
 
+
+@runtime_checkable
+class _SqlTemplateProtocol(Protocol):
+    _query: Callable
+    filename: str
+
+
+class Sql:
     def __new__(cls, *args, **kwargs):
         raise TypeError("Direct instantiation is not allowed, use a classmethod.")
 
     @property
     def query(self) -> str:
-        assert callable(self._query)  # should always be set
-        if hasattr(self, "filename"):
+        if isinstance(self, _SqlTemplateProtocol):
             # path should always be set if we read from a template
             if not hasattr(self, "path"):
                 raise ValueError("No path config supplied")
-            return self._query(self.filename, self.path)
+            return self._query(self.filename, getattr(self, "path"))
+        assert isinstance(self, _SqlRawProtocol)
         return self._query()
 
     @classmethod
     def raw(cls, query: str) -> Self:
         self = object.__new__(cls)
-        self._query = lambda: query
+        setattr(self, "_query", lambda: query)
         return self
 
     @classmethod
     def template(cls, filename: str, *, path: Path | None = None) -> Self:
         self = object.__new__(cls)
-        self._query = _read_sql_template
-        self.filename = filename
+        setattr(self, "_query",  _read_sql_template)
+        setattr(self, "filename", filename)
         # can also deferred from the config if not specified here
         if path:
-            self.path = path
+            setattr(self, "path", path)
         return self
 
 
@@ -97,7 +103,7 @@ class Db:
     def execute(self, sql: Sql, *args) -> SqlRow:
         if hasattr(sql, "template") and not hasattr(sql, "path"):
             # path is deferred, lets set it from the config
-            sql.path = self._sql_templates_dir
+            setattr(sql, "path", self._sql_templates_dir)
         return self.cursor.execute(sql.query, *args)
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:

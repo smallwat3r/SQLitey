@@ -21,11 +21,16 @@ venv: $(VENV_PYTHON)  ## Create a Python virtual environment
 
 .PHONY: deps
 deps:  ## Install requirements in virtual environment
+	$(PYTHON) -m ensurepip
 	$(PYTHON) -m pip install uv
 
 .PHONY: tests
 tests:  ## Run unit tests
 	$(PYTHON) -m uv run pytest --cov=$(SRC) --cov-report term-missing tests
+
+.PHONY: mypy
+mypy:  ## Run mypy
+	$(PYTHON) -m uv run mypy $(SRC)
 
 .PHONY: ruff
 ruff:  ## Run ruff
