@@ -13,7 +13,7 @@ class DbConfig:
 
 
 @lru_cache
-def _get_sql_template(filename: str, path: Path) -> str:
+def _read_sql_template(filename: str, path: Path) -> str:
     return (path / filename).read_text().strip()
 
 
@@ -45,7 +45,7 @@ class Sql:
     @classmethod
     def template(cls, filename: str, *, path: Path | None = None) -> Self:
         self = object.__new__(cls)
-        self._query = _get_sql_template
+        self._query = _read_sql_template
         self.filename = filename
         # can also deferred from the config if not specified here
         if path:
