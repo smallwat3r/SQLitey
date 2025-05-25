@@ -59,7 +59,7 @@ class Sql:
         self = object.__new__(cls)
         setattr(self, "_query", _read_sql_template)
         setattr(self, "filename", filename)
-        # can also deferred from the config if not specified here
+        # can also be deferred from the config if not set here
         if path:
             setattr(self, "path", path)
         return self
