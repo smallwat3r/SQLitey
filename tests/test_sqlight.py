@@ -127,7 +127,7 @@ def test_db_context_manager_rollback(config):
 
 
 def test_db_autocommit_behaviour(config):
-    """Test rolling back in context manager."""
+    """Test autocommit works as expected in context manager."""
     with raises(OperationalError):
         with Db.from_config(config, autocommit=True) as db:
             db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
