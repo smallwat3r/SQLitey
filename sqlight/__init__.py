@@ -18,12 +18,17 @@ def _get_sql_template(filename: str, path: Path) -> str:
 
 
 class Sql:
+    # possible attrs this object can hold
+    _query: Callable
+    path: Path | None
+    filename: str | None
+
     def __new__(cls, *args, **kwargs):
         raise TypeError("Direct instantiation is not allowed, use a classmethod.")
 
     @property
     def query(self) -> str:
-        assert isinstance(self._query, Callable)
+        assert callable(self._query)  # should always be set
         if hasattr(self, "filename"):
             # path should always be set if we read from a template
             if not hasattr(self, "path"):
@@ -60,8 +65,7 @@ def dict_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
 
 
 def namedtuple_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
-    fields = [col[0] for col in cursor.description]
-    Row = namedtuple("Row", fields)
+    Row = namedtuple("Row", [str(col[0]) for col in cursor.description])  # type: ignore
     return Row(*row)
 
 
@@ -69,7 +73,7 @@ class Db:
     def __init__(
         self,
         *args,
-        row_factory: Callable | None = None,
+        row_factory: Callable[[sqlite3.Cursor, sqlite3.Row], SqlRow] | None = None,
         sql_templates_dir: Path | None = None,
         **kwargs,
     ) -> None:
