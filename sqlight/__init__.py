@@ -78,8 +78,11 @@ class Db:
         *args,
         row_factory: RowFactory | None = None,
         sql_templates_dir: Path | None = None,
+        autocommit: bool = False,
         **kwargs,
     ) -> None:
+        if autocommit:
+            kwargs["isolation_level"] = None
         self.conn = sqlite3.connect(*args, **kwargs)
         if row_factory:
             self.conn.row_factory = row_factory

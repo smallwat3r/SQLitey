@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from sqlite3.dbapi2 import OperationalError
 from tempfile import NamedTemporaryFile
 
 from pytest import fixture, raises
@@ -111,6 +112,30 @@ def test_db_commit(config):
         db.commit(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
         result = db.fetchone(Sql.raw("SELECT COUNT(id) as total FROM users;"))
     assert result.total == 3
+
+
+def test_db_context_manager_rollback(config):
+    """Test rolling back in context manager."""
+    with raises(OperationalError):
+        with Db.from_config(config) as db:
+            db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
+            db.execute(Sql.raw("SYNTAX ERROR;"))  # raise
+
+    with Db.from_config(config) as db:
+        result = db.fetchone(Sql.raw("SELECT id FROM users WHERE id = 3;"))
+    assert result is None
+
+
+def test_db_autocommit_behaviour(config):
+    """Test rolling back in context manager."""
+    with raises(OperationalError):
+        with Db.from_config(config, autocommit=True) as db:
+            db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
+            db.execute(Sql.raw("SYNTAX ERROR;"))  # raise
+
+    with Db.from_config(config) as db:
+        result = db.fetchone(Sql.raw("SELECT id FROM users WHERE id = 3;"))
+    assert result == (3,)
 
 
 def test_db_undefer_template_path(temp_db_path):
