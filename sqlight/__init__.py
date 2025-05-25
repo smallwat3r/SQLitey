@@ -37,13 +37,13 @@ class Sql:
         return self._query()
 
     @classmethod
-    def raw(cls, query: str):
+    def raw(cls, query: str) -> Self:
         self = object.__new__(cls)
         self._query = lambda: query
         return self
 
     @classmethod
-    def template(cls, filename: str, path: Path | None = None):
+    def template(cls, filename: str, path: Path | None = None) -> Self:
         self = object.__new__(cls)
         self._query = _get_sql_template
         self.filename = filename
