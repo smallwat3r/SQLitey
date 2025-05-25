@@ -72,6 +72,20 @@ def namedtuple_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
     return Row(*row)
 
 
+class _SafeCursor:
+    """Proxy to protect `cursor.execute` to be accessed directly."""
+
+    def __init__(self, safe_cursor: sqlite3.Cursor) -> None:
+        self._safe_cursor = safe_cursor
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "execute":
+            raise AttributeError(
+                "Cannot use db.cursor.execute(), use db.execute() instead"
+            )
+        return getattr(self._safe_cursor, name)
+
+
 class Db:
     def __init__(
         self,
@@ -86,7 +100,7 @@ class Db:
         self.conn = sqlite3.connect(*args, **kwargs)
         if row_factory:
             self.conn.row_factory = row_factory
-        self.cursor = self.conn.cursor()
+        self.cursor = _SafeCursor(self.conn.cursor())
         self._sql_templates_dir = sql_templates_dir
 
     @classmethod
@@ -107,7 +121,7 @@ class Db:
         if hasattr(sql, "template") and not hasattr(sql, "path"):
             # path is deferred, lets set it from the config
             setattr(sql, "path", self._sql_templates_dir)
-        return self.cursor.execute(sql.query, *args)
+        return self.cursor._safe_cursor.execute(sql.query, *args)
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:
         return self.execute(sql, *args).fetchone()

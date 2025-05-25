@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from pathlib import Path
 from sqlite3.dbapi2 import OperationalError
 from tempfile import NamedTemporaryFile
@@ -124,6 +125,15 @@ def test_db_context_manager_rollback(config):
     with Db.from_config(config) as db:
         result = db.fetchone(Sql.raw("SELECT id FROM users WHERE id = 3;"))
     assert result is None
+
+
+def test_access_cursor_execute(config):
+    """Test accessing cursor.execute() is forbidden."""
+    with Db.from_config(config) as db:
+        with raises(AttributeError, match=re.escape("Cannot use db.cursor.execute(), use db.execute() instead")):
+            db.cursor.execute(Sql.raw("SELECT 1;"))
+        # however we should be able to access other attributes
+        assert db.cursor.rowcount == -1
 
 
 def test_db_autocommit_behaviour(config):
