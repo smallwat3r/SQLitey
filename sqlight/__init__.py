@@ -32,13 +32,13 @@ class Sql:
         return self._query()
 
     @classmethod
-    def raw(cls, query: str) -> Self:
+    def raw(cls, query: str):
         self = object.__new__(cls)
         self._query = lambda: query
         return self
 
     @classmethod
-    def template(cls, filename: str, path: Path | None = None) -> Self:
+    def template(cls, filename: str, path: Path | None = None):
         self = object.__new__(cls)
         self._query = _get_sql_template
         self.filename = filename
@@ -81,7 +81,7 @@ class Db:
 
     def _execute(self, sql: Sql, *args) -> SqlRow:
         if hasattr(sql, "template") and not hasattr(sql, "path"):
-            # path is deferred, lets get set it from the config
+            # path is deferred, lets set it from the config
             sql.path = self._config.sql_templates_dir
         return self.cursor.execute(sql.query, *args)
 
