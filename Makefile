@@ -40,7 +40,6 @@ ruff:  ## Run ruff
 black:  ## Run black
 	$(PYTHON) -m uv run black $(SRC)
 
-
 .PHONY: release
 release:  ## Release to PyPI
 	$(PYTHON) -m build
