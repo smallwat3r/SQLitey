@@ -1,8 +1,8 @@
 # SQLight
 
-Still a WIP...
+Still very much experimental and WIP...
 
-SQLite nano framework.
+A useful wrapper around SQLite.
 
 ``` python
 from sqlight import Db, DbPathConfig, Sql, namedtuple_factory
