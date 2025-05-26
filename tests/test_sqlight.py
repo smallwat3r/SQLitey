@@ -29,30 +29,23 @@ def config(temp_db_path):
     )
 
 
-def test_sql_direct_instantiation():
-    """Test using Sql without a classmethod."""
-    with raises(TypeError, match="Direct instantiation is not allowed"):
-        Sql(...)
-
-
 def test_raw_sql():
     """Test loading raw SQL."""
     sql = Sql.raw("SELECT 1;")
-    assert sql.query == "SELECT 1;"
+    assert sql.load_query() == "SELECT 1;"
 
 
 def test_template_sql_no_path_config():
     """Test loading a template without a path."""
     sql = Sql.template("test.sql")
     with raises(ValueError, match="No template path configured"):
-        sql.query
+        sql.load_query()
 
 
 def test_template_sql():
     """Test loading a template."""
-    sql = Sql.template("test.sql")
-    sql.path = Path(__file__).resolve().parent / "sql"
-    assert sql.query == "SELECT 1;"
+    sql = Sql.template("test.sql", path=Path(__file__).resolve().parent / "sql")
+    assert sql.load_query() == "SELECT 1;"
 
 
 def test_db_fetchone(config):
@@ -121,7 +114,6 @@ def test_db_context_manager_rollback(config):
         with Db.from_config(config) as db:
             db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
             db.execute(Sql.raw("SYNTAX ERROR;"))  # raise
-
     with Db.from_config(config) as db:
         result = db.fetchone(Sql.raw("SELECT id FROM users WHERE id = 3;"))
     assert result is None
@@ -142,7 +134,6 @@ def test_db_autocommit_behaviour(config):
         with Db.from_config(config, autocommit=True) as db:
             db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate');"))
             db.execute(Sql.raw("SYNTAX ERROR;"))  # raise
-
     with Db.from_config(config) as db:
         result = db.fetchone(Sql.raw("SELECT id FROM users WHERE id = 3;"))
     assert result == (3,)
@@ -153,4 +144,11 @@ def test_db_undefer_template_path(temp_db_path):
     sql = Sql.template("test.sql", path=Path(__file__).resolve().parent / "sql")
     with Db(temp_db_path) as db:
         result = db.fetchone(sql)
+    assert result == (1,)
+
+
+def test_db_defer_template_path(config):
+    """Test setting template path from a config."""
+    with Db.from_config(config) as db:
+        result = db.fetchone(Sql.template("test.sql"))
     assert result == (1,)

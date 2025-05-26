@@ -3,7 +3,7 @@ from collections import namedtuple
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Protocol, Self, TypeAlias, runtime_checkable
+from typing import Any, Callable, Self, TypeAlias
 
 
 @dataclass(frozen=True)
@@ -17,52 +17,41 @@ class DbPathConfig:
 
 
 @lru_cache
-def _read_sql_template(filename: str, path: Path) -> str:
-    return (path / filename).read_text().strip()
-
-
-@runtime_checkable
-class _SqlRawProtocol(Protocol):
-    _query: Callable
-
-
-@runtime_checkable
-class _SqlTemplateProtocol(Protocol):
-    _query: Callable
-    filename: str
+def _read_sql_template(filename: str, template_path: Path) -> str:
+    return (template_path / filename).read_text().strip()
 
 
 class Sql:
     """Represent a SQL query."""
 
-    def __new__(cls, *args, **kwargs):
-        raise TypeError("Direct instantiation is not allowed, use a classmethod.")
+    _is_templated = False
+
+    def __init__(self, query_loader: Callable, **kwargs) -> None:
+        self._query_loader = query_loader
+        self._store = kwargs
 
     @property
-    def query(self) -> str:
-        if isinstance(self, _SqlTemplateProtocol):
-            # path should always be set if we read from a template
-            if not hasattr(self, "path"):
-                raise ValueError("No template path configured")
-            return self._query(self.filename, getattr(self, "path"))
-        assert isinstance(self, _SqlRawProtocol)
-        return self._query()
+    def has_template_path(self) -> bool:
+        return bool(self._is_templated and self._store.get("template_path"))
+
+    def set_template_path(self, template_path: Path) -> None:
+        if self._is_templated:
+            self._store["template_path"] = template_path
+
+    def load_query(self) -> str:
+        if self._is_templated and not self.has_template_path:
+            raise ValueError("No template path configured")
+        return self._query_loader(**self._store)
 
     @classmethod
     def raw(cls, query: str) -> Self:
-        self = object.__new__(cls)
-        setattr(self, "_query", lambda: query)
-        return self
+        return cls(lambda *args, **kwargs: query)
 
     @classmethod
     def template(cls, filename: str, *, path: Path | None = None) -> Self:
-        self = object.__new__(cls)
-        setattr(self, "_query", _read_sql_template)
-        setattr(self, "filename", filename)
-        # can also be deferred from the config if not set here
-        if path:
-            setattr(self, "path", path)
-        return self
+        cls_ = cls(_read_sql_template, template_path=path, filename=filename)
+        cls_._is_templated = True
+        return cls_
 
 
 SqlRow: TypeAlias = Any
@@ -126,10 +115,10 @@ class Db:
         self.conn.close()
 
     def execute(self, sql: Sql, *args) -> SqlRow:
-        if hasattr(sql, "template") and not hasattr(sql, "path"):
+        if not sql.has_template_path and self._sql_templates_dir:
             # path is deferred, lets set it from the config
-            setattr(sql, "path", self._sql_templates_dir)
-        return self.cursor._safe_cursor.execute(sql.query, *args)
+            sql.set_template_path(self._sql_templates_dir)
+        return self.cursor._safe_cursor.execute(sql.load_query(), *args)
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:
         return self.execute(sql, *args).fetchone()
