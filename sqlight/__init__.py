@@ -69,6 +69,9 @@ def namedtuple_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> SqlRow:
     return Row(*row)
 
 
+_HOOKED_METHODS = ("execute", "executemany", "executescript")
+
+
 class _SafeCursor:
     """Proxy to protect `cursor.execute` to be accessed directly."""
 
@@ -76,10 +79,8 @@ class _SafeCursor:
         self._safe_cursor = safe_cursor
 
     def __getattr__(self, name: str) -> Any:
-        if name == "execute":
-            raise AttributeError(
-                "Cannot use db.cursor.execute(), use db.execute() instead"
-            )
+        if name in _HOOKED_METHODS:
+            raise AttributeError(f"Cannot access {name} from cursor directly")
         return getattr(self._safe_cursor, name)
 
 
@@ -116,11 +117,31 @@ class Db:
     def __exit__(self, *args, **kwargs) -> None:
         self.conn.close()
 
-    def execute(self, sql: Sql, *args) -> SqlRow:
+    def _pre_execute_hook(self, sql: Sql) -> None:
         if not sql.has_template_path and self._sql_templates_dir:
             # path is deferred, lets set it from the config
             sql.set_template_path(self._sql_templates_dir)
+
+    def __getattribute__(self, name: str) -> Any:
+        # inject hook before runnning specific methods
+        attr = super().__getattribute__(name)
+        if name in _HOOKED_METHODS:
+
+            def wrapper(*args, **kwargs):
+                self._pre_execute_hook(args[0])
+                return attr(*args, **kwargs)
+
+            return wrapper
+        return attr
+
+    def execute(self, sql: Sql, *args) -> SqlRow:
         return self.cursor._safe_cursor.execute(sql.load_query(), *args)
+
+    def executemany(self, sql: Sql, *args) -> SqlRow:
+        return self.cursor._safe_cursor.executemany(sql.load_query(), *args)
+
+    def executescript(self, sql: Sql) -> SqlRow:
+        return self.cursor._safe_cursor.executescript(sql.load_query())
 
     def fetchone(self, sql: Sql, *args) -> SqlRow:
         return self.execute(sql, *args).fetchone()
