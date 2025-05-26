@@ -49,6 +49,8 @@ class Sql:
 
     @classmethod
     def template(cls, filename: str, *, path: Path | None = None) -> Self:
+        # path is optional so we can defer setting at a later time, in order to
+        # derive its value from a config for example.
         cls_ = cls(_read_sql_template, template_path=path, filename=filename)
         cls_._is_templated = True
         return cls_
