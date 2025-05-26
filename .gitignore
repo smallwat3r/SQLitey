@@ -3,5 +3,4 @@
 .venv/
 build/
 dist/
-sqlight.egg-info/
 .mypy_cache/

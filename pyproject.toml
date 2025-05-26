@@ -1,15 +1,22 @@
 [project]
 name = "sqlight"
 version = "0.1.0"
-description = "SQLite nano framework"
+description = "Useful wrapper around SQLite"
 readme = "README.md"
+license = { file="LICENSE" }
 requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
 dev = [
     "black>=25.1.0",
+    "build>=1.2.2.post1",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.11",
+    "twine>=6.1.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

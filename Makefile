@@ -39,3 +39,9 @@ ruff:  ## Run ruff
 .PHONY: black
 black:  ## Run black
 	$(PYTHON) -m uv run black $(SRC)
+
+
+.PHONY: release
+release:  ## Release to PyPI
+	$(PYTHON) -m build
+	$(PYTHON) -m twine upload dist/*
