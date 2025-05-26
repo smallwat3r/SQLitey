@@ -123,8 +123,8 @@ class Db:
             sql.set_template_path(self._sql_templates_dir)
 
     def __getattribute__(self, name: str) -> Any:
-        # inject hook before runnning specific methods
         attr = super().__getattribute__(name)
+        # inject hook before running sensitive methods
         if name in _HOOKED_METHODS:
 
             def wrapper(*args, **kwargs):
