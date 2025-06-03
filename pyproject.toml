@@ -1,5 +1,5 @@
 [project]
-name = "sqlight"
+name = "SQLitey"
 version = "0.1.0"
 description = "Useful wrapper around SQLite"
 readme = "README.md"
