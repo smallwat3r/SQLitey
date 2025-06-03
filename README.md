@@ -9,7 +9,11 @@ Key Features:
 - Support for both templated and raw SQL queries
 - Optional config usage for quick, one-off database access
 
-## Exampe usage
+## Installation
+
+    pip install sqlitey
+
+## Example usage
 
 ### Using a Config File
 
