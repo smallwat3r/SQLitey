@@ -23,6 +23,7 @@ venv: $(VENV_PYTHON)  ## Create a Python virtual environment
 deps:  ## Install requirements in virtual environment
 	$(PYTHON) -m ensurepip
 	$(PYTHON) -m pip install uv
+	$(PYTHON) -m uv sync --inexact
 
 .PHONY: tests
 tests:  ## Run unit tests
