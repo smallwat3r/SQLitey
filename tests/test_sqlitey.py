@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 from pytest import fixture, raises
 
-from sqlight import Db, DbPathConfig, Sql, dict_factory, namedtuple_factory
+from sqlitey import Db, DbPathConfig, Sql, dict_factory, namedtuple_factory
 
 
 @fixture

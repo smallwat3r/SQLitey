@@ -1,6 +1,6 @@
-# SQLight
+# SQLitey
 
-Sqlight is a lightweight and flexible wrapper around SQLite, designed to streamline database access using configuration files, SQL templates, and custom row factories.
+SQLitey is a lightweight and flexible wrapper around SQLite, designed to streamline database access using configuration files, SQL templates, and custom row factories.
 
 Key Features:
 - Configuration-driven setup for database paths and SQL templates
@@ -17,7 +17,7 @@ Define a configuration with the database path and the directory for SQL template
 
 ``` python
 from pathlib import Path
-from sqlight import Db, DbPathConfig, Sql, namedtuple_factory
+from sqlitey import Db, DbPathConfig, Sql, namedtuple_factory
 
 dir = Path(__file__).resolve().parent
 config = DbPathConfig(

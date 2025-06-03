@@ -1,4 +1,4 @@
-SRC = sqlight
+SRC = sqlitey
 
 .PHONY: help
 help:  ## Show this help menu
