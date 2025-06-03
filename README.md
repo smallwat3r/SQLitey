@@ -54,4 +54,4 @@ with Db("db.sqlite3") as db:
 
 ### More examples
 
-See more examples in [tests](./tests/test_sqlight.py)
+See more examples in [tests](https://github.com/smallwat3r/SQLitey/blob/main/tests/test_sqlitey.py)
