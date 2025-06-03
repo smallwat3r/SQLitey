@@ -15,8 +15,8 @@ jobs:
     - name: Install dependencies
       run: pip install uv && uv sync --inexact
     - name: Lint with Ruff
-      run: python -m uv run ruff check sqlight
+      run: python -m uv run ruff check sqlitey
     - name: Run Mypy
-      run: python -m uv run mypy sqlight
+      run: python -m uv run mypy sqlitey
     - name: Test suite
-      run: python -m uv run pytest --cov=sqlight tests
+      run: python -m uv run pytest --cov=sqlitey tests
