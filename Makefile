@@ -20,7 +20,7 @@ $(VENV_PYTHON):
 venv: $(VENV_PYTHON)  ## Create a Python virtual environment
 
 .PHONY: deps
-deps:  ## Install requirements in virtual environment
+deps: venv ## Install requirements in virtual environment
 	$(PYTHON) -m ensurepip
 	$(PYTHON) -m pip install uv
 	$(PYTHON) -m uv sync --inexact
