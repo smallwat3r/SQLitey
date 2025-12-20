@@ -1,4 +1,12 @@
-import re
+"""Tests for the sqlitey module.
+
+This module tests the core functionality of sqlitey including:
+- Sql class (raw and template queries)
+- Db class (execute, fetch, commit operations)
+- Row factories (dict and namedtuple)
+- Security features (cursor protection, path traversal prevention)
+"""
+
 import sqlite3
 from pathlib import Path
 from sqlite3.dbapi2 import OperationalError
@@ -11,6 +19,12 @@ from sqlitey import Db, DbPathConfig, Sql, dict_factory, namedtuple_factory
 
 @fixture
 def temp_db_path():
+    """Create a temporary SQLite database with test data.
+
+    Yields a path to a database containing a 'users' table with two rows:
+    - (1, 'Alice')
+    - (2, 'John')
+    """
     with NamedTemporaryFile(suffix=".db", delete=True) as tmp:
         db_path = Path(tmp.name)
         conn = sqlite3.connect(db_path)
@@ -23,6 +37,7 @@ def temp_db_path():
 
 @fixture
 def config(temp_db_path):
+    """Create a DbPathConfig with the temp database and test SQL templates."""
     return DbPathConfig(
         database=temp_db_path,
         sql_templates_dir=Path(__file__).resolve().parent / "sql"
@@ -123,9 +138,9 @@ def test_access_cursor_execute(config):
     """Test accessing cursor.execute() is forbidden."""
     with Db.from_config(config) as db:
         with raises(AttributeError, match="Cannot access execute from cursor directly"):
-            db.cursor.execute(Sql.raw("SELECT 1;"))
+            db._cursor.execute(Sql.raw("SELECT 1;"))
         # however we should be able to access other attributes
-        assert db.cursor.rowcount == -1
+        assert db._cursor.rowcount == -1
 
 
 def test_db_autocommit_behaviour(config):
@@ -178,3 +193,38 @@ def test_executemany(config):
         results = db.fetchall(Sql.raw("SELECT name FROM users"))
     assert "Alicia" in str(results)
     assert "Bobby" in str(results)
+
+
+def test_template_path_traversal_dotdot():
+    """Test path traversal with .. is blocked."""
+    sql = Sql.template("../etc/passwd", path=Path(__file__).resolve().parent / "sql")
+    with raises(ValueError, match="Invalid template filename"):
+        sql.load_query()
+
+
+def test_template_path_traversal_absolute():
+    """Test path traversal with absolute path is blocked."""
+    sql = Sql.template("/etc/passwd", path=Path(__file__).resolve().parent / "sql")
+    with raises(ValueError, match="Invalid template filename"):
+        sql.load_query()
+
+
+def test_template_file_not_found():
+    """Test loading a template that doesn't exist."""
+    sql = Sql.template("nonexistent.sql", path=Path(__file__).resolve().parent / "sql")
+    with raises(FileNotFoundError, match="SQL template not found"):
+        sql.load_query()
+
+
+def test_access_cursor_executemany(config):
+    """Test accessing cursor.executemany() is forbidden."""
+    with Db.from_config(config) as db:
+        with raises(AttributeError, match="Cannot access executemany from cursor directly"):
+            db._cursor.executemany(Sql.raw("SELECT 1;"), [])
+
+
+def test_access_cursor_executescript(config):
+    """Test accessing cursor.executescript() is forbidden."""
+    with Db.from_config(config) as db:
+        with raises(AttributeError, match="Cannot access executescript from cursor directly"):
+            db._cursor.executescript(Sql.raw("SELECT 1;"))
