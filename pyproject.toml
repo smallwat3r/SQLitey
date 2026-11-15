@@ -1,21 +1,34 @@
 [project]
 name = "SQLitey"
-version = "0.1.1"
+version = "0.2.0"
 description = "Useful wrapper around SQLite"
 readme = "README.md"
-license = { file="LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/smallwat3r/sqlitey"
+Issues = "https://github.com/smallwat3r/sqlitey/issues"
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
-    "build>=1.2.2.post1",
     "mypy>=1.16.0",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.11",
-    "twine>=6.1.0",
 ]
 
 [build-system]

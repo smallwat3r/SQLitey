@@ -1,13 +1,32 @@
 # SQLitey
 
-SQLitey is a lightweight and flexible wrapper around SQLite, designed to streamline database access using configuration files, SQL templates, and custom row factories.
+A small, typed wrapper around Python's built-in `sqlite3`. It keeps you writing plain SQL, and takes care of the repetitive parts: connections, transactions, row shapes, SQL files and migrations.
 
-Key Features:
-- Configuration-driven setup for database paths and SQL templates
-- Support for SQL template files to keep queries organized
-- Customizable row factories (e.g., return rows as namedtuples)
-- Support for both templated and raw SQL queries
-- Optional config usage for quick, one-off database access
+- **No dependencies**, standard library only
+- **Plain SQL**, inline or loaded from `.sql` files
+- **Rows the way you want them**: tuples, dicts, namedtuples or your own dataclasses
+- **Safe transactions**: commit on success, roll back on error, nestable atomic blocks
+- **Migrations built in**, from numbered `.sql` files
+- **Fully typed**, ships with type hints
+
+Requires Python 3.11 or newer.
+
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Guide](#guide)
+  - [Writing queries](#writing-queries)
+  - [Reading results](#reading-results)
+  - [Row factories](#row-factories)
+  - [SQL files](#sql-files)
+  - [Transactions](#transactions)
+  - [Bulk inserts and scripts](#bulk-inserts-and-scripts)
+  - [Pragmas](#pragmas)
+  - [Migrations](#migrations)
+- [Things to know](#things-to-know)
+- [API reference](#api-reference)
+- [Development](#development)
 
 ## Installation
 
@@ -15,117 +34,302 @@ Key Features:
 pip install sqlitey
 ```
 
-## Quick Start
+## Quick start
 
 ```python
 from sqlitey import Db, Sql
 
-with Db("mydb.sqlite") as db:
-    db.commit(Sql.raw("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"))
-    db.commit(Sql.raw("INSERT INTO users (name) VALUES (?)"), ("Alice",))
-    user = db.fetchone(Sql.raw("SELECT * FROM users WHERE id = ?"), (1,))
+with Db("app.db") as db:
+    db.execute(Sql.raw("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)"))
+    db.execute(Sql.raw("INSERT INTO users (name) VALUES (?)"), ("Alice",))
+
+    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE name = ?"), ("Alice",))
     print(user)  # (1, 'Alice')
 ```
 
-## Usage
+That is all there is to it. When the `with` block ends, your changes are committed and the connection is closed. If an exception is raised inside the block, the changes are rolled back instead.
 
-### Row Factories
+## Guide
 
-Return rows as dictionaries or namedtuples instead of tuples:
+### Writing queries
+
+Every query is wrapped in a `Sql` object. Use `Sql.raw()` for inline SQL:
 
 ```python
-from sqlitey import Db, Sql, dict_factory, namedtuple_factory
+get_user = Sql.raw("SELECT id, name FROM users WHERE id = ?")
+```
 
-with Db("mydb.sqlite", row_factory=dict_factory) as db:
-    user = db.fetchone(Sql.raw("SELECT * FROM users WHERE id = ?"), (1,))
+Pass values separately, as parameters. Both positional (`?`) and named (`:name`) placeholders work:
+
+```python
+db.fetchone(Sql.raw("SELECT * FROM users WHERE id = ?"), (1,))
+db.fetchone(Sql.raw("SELECT * FROM users WHERE id = :id"), {"id": 1})
+```
+
+Never build a query by formatting values into the string, that is how SQL injection happens:
+
+```python
+# Don't do this
+db.fetchone(Sql.raw(f"SELECT * FROM users WHERE name = '{name}'"))
+
+# Do this
+db.fetchone(Sql.raw("SELECT * FROM users WHERE name = ?"), (name,))
+```
+
+To help with that, `Sql.raw()` is typed as `LiteralString`. Type checkers that enforce it, such as pyright, report the first example above as an error. Note this is a static check only, nothing is verified at runtime.
+
+### Reading results
+
+| You want | Use | Returns |
+|----------|-----|---------|
+| One row | `db.fetchone(sql, params)` | A row, or `None` |
+| All rows | `db.fetchall(sql, params)` | A list of rows |
+| A single value | `db.fetchval(sql, params)` | The first column of the first row, or `None` |
+| To loop over many rows | `db.execute(sql, params)` | A cursor you can iterate |
+
+```python
+total = db.fetchval(Sql.raw("SELECT COUNT(*) FROM users"))  # 2
+
+for user_id, name in db.execute(Sql.raw("SELECT id, name FROM users")):
+    print(user_id, name)
+```
+
+### Row factories
+
+By default rows are tuples. Pass a `row_factory` to get something friendlier.
+
+As dictionaries:
+
+```python
+from sqlitey import Db, Sql, dict_factory
+
+with Db("app.db", row_factory=dict_factory) as db:
+    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE id = ?"), (1,))
     print(user["name"])  # 'Alice'
+```
 
-with Db("mydb.sqlite", row_factory=namedtuple_factory) as db:
-    user = db.fetchone(Sql.raw("SELECT * FROM users WHERE id = ?"), (1,))
+As namedtuples:
+
+```python
+from sqlitey import Db, Sql, namedtuple_factory
+
+with Db("app.db", row_factory=namedtuple_factory) as db:
+    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE id = ?"), (1,))
     print(user.name)  # 'Alice'
 ```
 
-### SQL Templates
+As your own classes, the column names must match the field names:
 
-Keep SQL queries in separate files for better organization:
+```python
+from dataclasses import dataclass
+from sqlitey import Db, Sql, dataclass_factory
+
+@dataclass
+class User:
+    id: int
+    name: str
+
+with Db("app.db", row_factory=dataclass_factory(User)) as db:
+    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE id = ?"), (1,))
+    print(user)  # User(id=1, name='Alice')
+```
+
+> **Tip:** with `namedtuple_factory`, a column such as `COUNT(*)` is not a valid attribute name, so it is renamed to its position (`_0`, `_1`, ...). Give it an alias to get a proper name: `SELECT COUNT(*) AS total`.
+
+### SQL files
+
+Longer queries are easier to read, and to syntax-highlight, in their own `.sql` files. Point `Db` at the directory and refer to queries by filename:
+
+```
+sql/
+  get_user_by_id.sql
+  list_users.sql
+```
 
 ```python
 from pathlib import Path
-from sqlitey import Db, DbPathConfig, Sql
+from sqlitey import Db, Sql
 
-config = DbPathConfig(
-    database=Path("mydb.sqlite"),
-    sql_templates_dir=Path("sql/"),
-)
-
-with Db.from_config(config) as db:
-    # Loads query from sql/get_user_by_id.sql
+with Db("app.db", sql_templates_dir=Path("sql")) as db:
     user = db.fetchone(Sql.template("get_user_by_id.sql"), (1,))
 ```
 
-Or specify the template path directly:
+A single query can also carry its own directory:
 
 ```python
-with Db("mydb.sqlite") as db:
-    sql = Sql.template("get_user_by_id.sql", path=Path("sql/"))
-    user = db.fetchone(sql, (1,))
+sql = Sql.template("get_user_by_id.sql", path=Path("sql"))
 ```
 
-### Autocommit Mode
-
-Disable transaction management for auto-committing each statement:
+If you pass the database and the SQL directory around together, `DbPathConfig` bundles them:
 
 ```python
-with Db("mydb.sqlite", autocommit=True) as db:
-    db.execute(Sql.raw("UPDATE users SET name = ? WHERE id = ?"), ("Bob", 1))
+from sqlitey import Db, DbPathConfig
+
+config = DbPathConfig(database=Path("app.db"), sql_templates_dir=Path("sql"))
+
+with Db.from_config(config) as db:
+    ...
 ```
 
-### Batch Operations
+`Sql` objects are immutable, so you can define them once at the top of a module and reuse them everywhere.
 
-Execute multiple parameter sets or run SQL scripts:
+### Transactions
+
+Inside a `with Db(...)` block, your changes form one transaction:
+
+- the block ends normally, everything is **committed**
+- the block raises an exception, everything is **rolled back**
+
+For finer control, wrap a group of statements in `db.transaction()`. They succeed or fail together, without affecting the rest of your work:
 
 ```python
-with Db("mydb.sqlite", autocommit=True) as db:
-    # Execute same query with multiple parameter sets
-    users = [("Alice",), ("Bob",), ("Charlie",)]
-    db.executemany(Sql.raw("INSERT INTO users (name) VALUES (?)"), users)
+with Db("app.db") as db:
+    db.execute(Sql.raw("INSERT INTO users (name) VALUES (?)"), ("Alice",))
 
-    # Execute multiple statements as a script
-    db.executescript(Sql.raw("""
-        DELETE FROM users WHERE id = 1;
-        UPDATE users SET name = 'Robert' WHERE name = 'Bob';
-    """))
+    try:
+        with db.transaction():
+            db.execute(Sql.raw("INSERT INTO users (name) VALUES (?)"), ("Bob",))
+            raise RuntimeError("something went wrong")
+    except RuntimeError:
+        pass  # Bob is rolled back, Alice is kept
 ```
 
-## API Reference
+`db.transaction()` blocks can be nested. When no transaction is open yet, the outermost block commits as soon as it succeeds.
+
+Other options:
+
+- `db.commit(sql, params)` runs a statement and commits straight away
+- `Db("app.db", autocommit=True)` commits every statement as it runs
+- without a `with` block, call `db.close()` yourself when done. Uncommitted changes are discarded, so commit first
+
+### Bulk inserts and scripts
+
+Run one statement with many sets of parameters:
+
+```python
+users = [("Alice",), ("Bob",), ("Charlie",)]
+db.executemany(Sql.raw("INSERT INTO users (name) VALUES (?)"), users)
+```
+
+Run several statements at once:
+
+```python
+db.executescript(Sql.raw("""
+    DELETE FROM users WHERE id = 1;
+    UPDATE users SET name = 'Robert' WHERE name = 'Bob';
+"""))
+```
+
+### Pragmas
+
+SQLite's defaults are conservative, most notably **foreign keys are not enforced** unless you ask. `RECOMMENDED_PRAGMAS` turns on the settings most applications want: foreign keys, WAL journalling (readers do not block the writer) and `synchronous = normal`.
+
+```python
+from sqlitey import Db, RECOMMENDED_PRAGMAS
+
+with Db("app.db", pragmas=RECOMMENDED_PRAGMAS) as db:
+    ...
+```
+
+Or choose your own:
+
+```python
+with Db("app.db", pragmas={"foreign_keys": True, "cache_size": -8000}) as db:
+    ...
+```
+
+### Migrations
+
+Keep your schema changes as numbered `.sql` files, named `<version>_<description>.sql`:
+
+```
+migrations/
+  001_create_users.sql
+  002_add_email.sql
+```
+
+Then call `migrate` when your application starts:
+
+```python
+from pathlib import Path
+from sqlitey import Db
+
+with Db("app.db") as db:
+    applied = db.migrate(Path("migrations"))
+    print(f"{applied} migration(s) applied")
+```
+
+- Only files newer than the database's current version are run, in order. The version is stored in the database itself (`PRAGMA user_version`), so no extra table is needed.
+- Each file is all-or-nothing. If one fails, the database stays at the previous version and the error is raised.
+- It is safe to call from several processes at once, each file is applied only once.
+
+To add a change later, add a new file with the next number. Never edit a migration that has already been applied.
+
+## Things to know
+
+- **Do not commit inside a `db.transaction()` block.** `db.commit()` and `db.executescript()` both end the transaction early, and the block then fails on exit.
+- **`db.migrate()` needs a clean slate.** It raises `RuntimeError` if you have uncommitted changes, call it first.
+- **Migration files must not contain `BEGIN` or `COMMIT`.** Each file already runs in its own transaction.
+- **SQL files are cached.** A file is read once per process, restart to pick up edits.
+- **Need something not covered here?** The underlying `sqlite3` connection is available as `db.conn`.
+
+## API reference
 
 ### Sql
 
 | Method | Description |
 |--------|-------------|
-| `Sql.raw(query)` | Create a Sql instance from an inline query string |
-| `Sql.template(filename, path=None)` | Create a Sql instance from a template file |
+| `Sql.raw(query)` | A query from an inline string |
+| `Sql.template(filename, path=None)` | A query loaded from a `.sql` file |
 
 ### Db
 
 | Method | Description |
 |--------|-------------|
-| `Db(path, row_factory=None, sql_templates_dir=None, autocommit=False)` | Create a database connection |
-| `Db.from_config(config, **kwargs)` | Create from a `DbPathConfig` |
-| `execute(sql, *args)` | Execute a query and return the cursor |
-| `executemany(sql, *args)` | Execute a query against multiple parameter sets |
-| `executescript(sql)` | Execute multiple statements as a script |
-| `fetchone(sql, *args)` | Execute and return the first row |
-| `fetchall(sql, *args)` | Execute and return all rows |
-| `commit(sql, *args)` | Execute and commit the transaction |
+| `Db(database, row_factory=None, sql_templates_dir=None, autocommit=False, pragmas=None)` | Open a database. Extra arguments are passed to `sqlite3.connect()` |
+| `Db.from_config(config, **kwargs)` | Open a database from a `DbPathConfig` |
+| `execute(sql, params=())` | Run a query and return a cursor |
+| `executemany(sql, seq_of_params)` | Run a query once per set of parameters |
+| `executescript(sql)` | Run several statements as a script |
+| `fetchone(sql, params=())` | Run a query and return the first row, or `None` |
+| `fetchall(sql, params=())` | Run a query and return all rows |
+| `fetchval(sql, params=())` | Run a query and return the first column of the first row, or `None` |
+| `commit(sql, params=())` | Run a query and commit |
+| `transaction()` | Context manager, runs a block atomically, nestable |
+| `migrate(directory)` | Apply pending migration files, return how many ran |
+| `close()` | Close the connection, discarding uncommitted changes |
+| `conn` | The underlying `sqlite3.Connection` |
 
-### Row Factories
+### Row factories
 
-| Factory | Description |
-|---------|-------------|
-| `dict_factory` | Return rows as dictionaries |
-| `namedtuple_factory` | Return rows as namedtuples |
+| Factory | Rows are returned as |
+|---------|----------------------|
+| *(none)* | Tuples |
+| `dict_factory` | Dictionaries |
+| `namedtuple_factory` | Namedtuples |
+| `dataclass_factory(cls)` | Instances of `cls` |
 
-## More Examples
+### Other
 
-See the [test suite](https://github.com/smallwat3r/sqlitey/blob/main/tests/test_sqlitey.py) for more examples.
+| Name | Description |
+|------|-------------|
+| `DbPathConfig(database, sql_templates_dir=None)` | Bundles a database path and a SQL directory |
+| `RECOMMENDED_PRAGMAS` | Foreign keys on, WAL journalling, `synchronous = normal` |
+
+## Development
+
+The project uses [uv](https://docs.astral.sh/uv/).
+
+```
+make deps    # install dependencies
+make tests   # run the test suite
+make ruff    # lint
+make fmt     # format
+make mypy    # type check
+```
+
+The [test suite](https://github.com/smallwat3r/sqlitey/blob/main/tests/test_sqlitey.py) doubles as a set of runnable examples.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
