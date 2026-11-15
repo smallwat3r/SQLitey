@@ -21,6 +21,6 @@ jobs:
     - name: Check formatting
       run: uv run ruff format --check sqlitey tests
     - name: Run Mypy
-      run: uv run mypy sqlitey
+      run: uv run mypy sqlitey tests
     - name: Test suite
       run: uv run pytest --cov=sqlitey tests

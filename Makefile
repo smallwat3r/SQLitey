@@ -17,7 +17,7 @@ tests:  ## Run unit tests
 
 .PHONY: mypy
 mypy:  ## Run mypy
-	uv run mypy sqlitey
+	uv run mypy $(SRC)
 
 .PHONY: ruff
 ruff:  ## Run ruff linter
