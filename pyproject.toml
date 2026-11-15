@@ -1,6 +1,6 @@
 [project]
 name = "SQLitey"
-version = "0.2.0"
+version = "0.3.0"
 description = "Useful wrapper around SQLite"
 readme = "README.md"
 license = "MIT"
