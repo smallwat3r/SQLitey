@@ -10,8 +10,9 @@ This module tests the core functionality of sqlitey including:
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from sqlite3.dbapi2 import OperationalError
+from sqlite3.dbapi2 import IntegrityError, OperationalError
 from tempfile import NamedTemporaryFile
+from typing import Any, assert_type
 
 from pytest import fixture, raises
 
@@ -318,6 +319,31 @@ def test_dataclass_factory(config):
     assert results == [User(1, "Alice"), User(2, "John")]
 
 
+def test_row_factory_per_query(config):
+    """Test a per query row factory overrides the connection one."""
+
+    @dataclass
+    class User:
+        id: int
+        name: str
+
+    @dataclass
+    class Count:
+        total: int
+
+    users = Sql.raw("SELECT id, name FROM users")
+    count = Sql.raw("SELECT COUNT(*) AS total FROM users")
+    with Db.from_config(config, row_factory=dict_factory) as db:
+        assert db.fetchone(users, row_factory=dataclass_factory(User)) == User(
+            1, "Alice"
+        )
+        assert db.fetchall(count, row_factory=dataclass_factory(Count)) == [Count(2)]
+        cursor = db.execute(users, row_factory=dataclass_factory(User))
+        assert next(cursor) == User(1, "Alice")
+        # the connection factory still applies to other queries
+        assert db.fetchone(users) == {"id": 1, "name": "Alice"}
+
+
 def test_transaction_commits_when_outermost(config):
     """Test an outermost transaction block commits on success."""
     db = Db.from_config(config)
@@ -460,3 +486,93 @@ def test_migrate_skips_version_applied_by_another_connection(config, tmp_path):
 
         db._scalar = stale_first_read
         assert db.migrate(tmp_path) == 0
+
+
+def test_commit_refused_in_transaction_block(config):
+    """Test committing inside a transaction block is refused, work is kept."""
+    with Db.from_config(config) as db:
+        with db.transaction():
+            db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate')"))
+            with raises(RuntimeError, match=r"commit\(\) inside a transaction"):
+                db.commit(Sql.raw("INSERT INTO users VALUES (4, 'Bob')"))
+            with raises(RuntimeError, match=r"executescript\(\) inside a transaction"):
+                db.executescript(Sql.raw("DELETE FROM users;"))
+        # allowed again once the block is over
+        db.commit(Sql.raw("INSERT INTO users VALUES (5, 'Eve')"))
+    with Db.from_config(config) as db:
+        assert db.fetchall(Sql.raw("SELECT id FROM users")) == [(1,), (2,), (3,), (5,)]
+
+
+def test_readonly(config):
+    """Test a read-only database can be read but not written."""
+    with Db.from_config(config, readonly=True) as db:
+        assert db.fetchval(Sql.raw("SELECT COUNT(*) FROM users")) == 2
+        with raises(OperationalError, match="readonly"):
+            db.execute(Sql.raw("INSERT INTO users VALUES (3, 'Kate')"))
+
+
+def test_readonly_special_characters_in_path(tmp_path):
+    """Test URI special characters in the path are not read as options."""
+    path = tmp_path / "a b?mode=rwc#x.db"
+    with Db(path) as db:
+        db.execute(Sql.raw("CREATE TABLE t (x)"))
+    with Db(path, readonly=True) as db:
+        with raises(OperationalError, match="readonly"):
+            db.execute(Sql.raw("INSERT INTO t VALUES (1)"))
+
+
+def test_readonly_missing_file(tmp_path):
+    """Test read-only mode does not create a missing database."""
+    with raises(OperationalError):
+        Db(tmp_path / "missing.db", readonly=True)
+    assert not (tmp_path / "missing.db").exists()
+
+
+def test_readonly_rejects_uri(temp_db_path):
+    """Test readonly cannot be combined with a caller-provided URI."""
+    with raises(ValueError, match="readonly cannot be combined"):
+        Db(f"file:{temp_db_path}", readonly=True, uri=True)
+
+
+def test_row_types(config: DbPathConfig) -> None:
+    """Test row types are inferred from the row factory, checked by mypy."""
+
+    @dataclass
+    class User:
+        id: int
+        name: str
+
+    sql = Sql.raw("SELECT id, name FROM users")
+    with Db.from_config(config) as db:
+        assert_type(db.fetchone(sql), tuple[Any, ...] | None)
+        assert_type(db.fetchall(sql), list[tuple[Any, ...]])
+        # a per query factory takes precedence over the default row type
+        user = db.fetchone(sql, row_factory=dataclass_factory(User))
+        assert_type(user, User | None)
+    with Db(config.database, row_factory=dict_factory) as dict_db:
+        assert_type(dict_db.fetchone(sql), dict[str, Any] | None)
+        with dict_db.transaction() as inner:
+            assert_type(inner.fetchall(sql), list[dict[str, Any]])
+    with Db.from_config(config, row_factory=dataclass_factory(User)) as user_db:
+        assert_type(user_db.fetchall(sql), list[User])
+    with Db.from_config(config, row_factory=namedtuple_factory) as nt_db:
+        row = nt_db.fetchone(sql)
+        assert row is not None and row.name == "Alice"
+
+
+def test_transaction_rolls_back_when_commit_fails(config):
+    """Test a block whose final commit fails leaves nothing behind."""
+    with Db.from_config(config, pragmas={"foreign_keys": True}) as db:
+        db.executescript(
+            Sql.raw(
+                "CREATE TABLE pets (owner REFERENCES users(id)"
+                " DEFERRABLE INITIALLY DEFERRED);"
+            )
+        )
+        with raises(IntegrityError):
+            with db.transaction():
+                db.execute(Sql.raw("INSERT INTO pets VALUES (99)"))
+        assert not db.conn.in_transaction
+        with db.transaction():
+            db.execute(Sql.raw("INSERT INTO pets VALUES (1)"))
+        assert db.fetchall(Sql.raw("SELECT owner FROM pets")) == [(1,)]

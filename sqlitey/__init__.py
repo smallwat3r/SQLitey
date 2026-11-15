@@ -12,6 +12,7 @@ Example:
     ...     users = db.fetchall(Sql.raw("SELECT * FROM users"))
 """
 
+import os
 import re
 import sqlite3
 from collections import namedtuple
@@ -20,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, LiteralString, Self, TypeAlias, TypeVar
+from typing import Any, Generic, LiteralString, Self, TypeAlias, TypeVar, overload
 
 __all__ = [
     "Db",
@@ -138,6 +139,8 @@ SqlRow: TypeAlias = Any
 #: Type alias for parameters bound to a query.
 SqlParams: TypeAlias = Sequence[Any] | Mapping[str, Any]
 
+_StrPath: TypeAlias = str | os.PathLike[str]
+
 #: Type alias for row factory functions that transform raw rows.
 RowFactory: TypeAlias = Callable[[sqlite3.Cursor, tuple[Any, ...]], SqlRow]
 
@@ -161,7 +164,7 @@ def _make_row_class(fields: tuple[str, ...]) -> Callable[..., tuple[Any, ...]]:
     return namedtuple("Row", fields, rename=True)
 
 
-def namedtuple_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> tuple[Any, ...]:
+def namedtuple_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> Any:
     """Row factory that returns rows as namedtuples.
 
     Columns whose names are not valid identifiers (for example COUNT(*))
@@ -178,24 +181,32 @@ def namedtuple_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> tuple[An
 
 
 _T = TypeVar("_T")
+_RowT = TypeVar("_RowT")
+
+# A row factory whose row type is known, so per query results can be typed
+_TypedRowFactory: TypeAlias = Callable[[sqlite3.Cursor, tuple[Any, ...]], _T]
 
 
-def dataclass_factory(
-    cls: Callable[..., _T],
-) -> Callable[[sqlite3.Cursor, tuple[Any, ...]], _T]:
+def dataclass_factory(cls: Callable[..., _T]) -> _TypedRowFactory[_T]:
     """Build a row factory returning instances of the given class.
 
     Each row is passed to the class as keyword arguments, so the column
     names must match its fields. Works with dataclasses and any other
     class accepting its fields as keyword arguments.
 
+    A class maps to one shape of row, so this is usually passed per
+    query rather than to Db.
+
     Example:
         >>> @dataclass
         ... class User:
         ...     id: int
         ...     name: str
-        >>> with Db("mydb.sqlite", row_factory=dataclass_factory(User)) as db:
-        ...     user = db.fetchone(Sql.raw("SELECT id, name FROM users"))
+        >>> with Db("mydb.sqlite") as db:
+        ...     user = db.fetchone(
+        ...         Sql.raw("SELECT id, name FROM users"),
+        ...         row_factory=dataclass_factory(User),
+        ...     )
         ...     print(user.name)
     """
 
@@ -253,20 +264,27 @@ def _split_statements(script: str) -> Iterator[str]:
         yield statement
 
 
-class Db:
+class Db(Generic[_RowT]):
     """SQLite database wrapper running queries wrapped in Sql objects.
 
     Supports both inline queries and SQL template files. Used as a context
     manager, it commits on a clean exit, rolls back on an exception, and
     closes the connection either way.
 
+    The class is generic over its default row type, inferred from the row
+    factory given here, so fetchone() and fetchall() are typed accordingly.
+
     Args:
-        *args: Positional arguments passed to sqlite3.connect().
-        row_factory: Optional factory function to transform result rows.
+        database: Path to the database file, or ":memory:".
+        *args: Extra positional arguments passed to sqlite3.connect().
+        row_factory: Optional factory function to transform result rows,
+            can be overridden per query.
         sql_templates_dir: Optional directory for SQL template files.
         autocommit: If True, disable transaction management.
         pragmas: Optional pragmas to set on the connection, for example
             RECOMMENDED_PRAGMAS or {"foreign_keys": True}.
+        readonly: If True, open an existing database file read-only,
+            any write raises sqlite3.OperationalError.
         **kwargs: Keyword arguments passed to sqlite3.connect().
 
     Example:
@@ -275,43 +293,103 @@ class Db:
         ...     users = db.fetchall(Sql.raw("SELECT * FROM users"))
     """
 
+    @overload
+    def __init__(
+        self: "Db[tuple[Any, ...]]",
+        database: _StrPath,
+        *args: Any,
+        row_factory: None = None,
+        sql_templates_dir: Path | None = None,
+        autocommit: bool = False,
+        pragmas: Mapping[str, str | int] | None = None,
+        readonly: bool = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
+        database: _StrPath,
+        *args: Any,
+        row_factory: _TypedRowFactory[_RowT],
+        sql_templates_dir: Path | None = None,
+        autocommit: bool = False,
+        pragmas: Mapping[str, str | int] | None = None,
+        readonly: bool = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        database: _StrPath,
         *args: Any,
         row_factory: RowFactory | None = None,
         sql_templates_dir: Path | None = None,
         autocommit: bool = False,
         pragmas: Mapping[str, str | int] | None = None,
+        readonly: bool = False,
         **kwargs: Any,
     ) -> None:
         if autocommit:
             kwargs["isolation_level"] = None
+        if readonly:
+            if kwargs.get("uri"):
+                raise ValueError("readonly cannot be combined with uri=True")
+            # as_uri() percent-encodes the path, so it cannot inject options
+            database = f"{Path(database).resolve().as_uri()}?mode=ro"
+            kwargs["uri"] = True
         statements = [_pragma_statement(k, v) for k, v in (pragmas or {}).items()]
-        self.conn = sqlite3.connect(*args, **kwargs)
+        self.conn = sqlite3.connect(database, *args, **kwargs)
         try:
             for statement in statements:
                 self.conn.execute(statement)
         except BaseException:
             self.conn.close()
             raise
-        if row_factory:
+        if row_factory is not None:
             self.conn.row_factory = row_factory
         self._sql_templates_dir = sql_templates_dir
         self._savepoint_depth = 0
 
+    @overload
     @classmethod
-    def from_config(cls, config: DbPathConfig, **kwargs: Any) -> Self:
+    def from_config(
+        cls, config: DbPathConfig, *, row_factory: None = None, **kwargs: Any
+    ) -> "Db[tuple[Any, ...]]": ...
+
+    @overload
+    @classmethod
+    def from_config(
+        cls,
+        config: DbPathConfig,
+        *,
+        row_factory: _TypedRowFactory[_T],
+        **kwargs: Any,
+    ) -> "Db[_T]": ...
+
+    @classmethod
+    def from_config(
+        cls,
+        config: DbPathConfig,
+        *,
+        row_factory: RowFactory | None = None,
+        **kwargs: Any,
+    ) -> "Db[Any]":
         """Create a Db instance from a DbPathConfig.
 
         Args:
             config: Database path configuration.
+            row_factory: Optional factory function to transform result rows.
             **kwargs: Additional arguments passed to the constructor.
         """
-        return cls(
+        db = cls(
             config.database,
             sql_templates_dir=config.sql_templates_dir,
             **kwargs,
         )
+        if row_factory is not None:
+            db.conn.row_factory = row_factory
+        return db
 
     def __enter__(self) -> Self:
         return self
@@ -332,14 +410,30 @@ class Db:
     def _load(self, sql: Sql) -> str:
         return sql.load_query(self._sql_templates_dir)
 
-    def execute(self, sql: Sql, params: SqlParams = ()) -> sqlite3.Cursor:
+    def _forbid_in_transaction_block(self, action: str) -> None:
+        # committing releases every savepoint, breaking the block atomicity
+        if self._savepoint_depth:
+            raise RuntimeError(f"Cannot call {action} inside a transaction() block")
+
+    def execute(
+        self,
+        sql: Sql,
+        params: SqlParams = (),
+        *,
+        row_factory: RowFactory | None = None,
+    ) -> sqlite3.Cursor:
         """Execute a SQL query and return a new cursor.
 
         Args:
             sql: The Sql object containing the query.
             params: Parameters to bind to the query.
+            row_factory: Row factory for this query only, defaults to the
+                one given to Db.
         """
-        return self.conn.execute(self._load(sql), params)
+        cursor = self.conn.cursor()
+        if row_factory is not None:
+            cursor.row_factory = row_factory
+        return cursor.execute(self._load(sql), params)
 
     def executemany(
         self, sql: Sql, seq_of_params: Iterable[SqlParams]
@@ -355,28 +449,71 @@ class Db:
     def executescript(self, sql: Sql) -> sqlite3.Cursor:
         """Execute multiple SQL statements as a script.
 
+        sqlite3 commits any open transaction before running a script, so
+        this is refused inside a transaction() block.
+
         Args:
             sql: The Sql object containing the script.
+
+        Raises:
+            RuntimeError: If called inside a transaction() block.
         """
+        self._forbid_in_transaction_block("executescript()")
         return self.conn.executescript(self._load(sql))
 
-    def fetchone(self, sql: Sql, params: SqlParams = ()) -> SqlRow | None:
+    @overload
+    def fetchone(
+        self, sql: Sql, params: SqlParams = ..., *, row_factory: _TypedRowFactory[_T]
+    ) -> _T | None: ...
+
+    @overload
+    def fetchone(
+        self, sql: Sql, params: SqlParams = ..., *, row_factory: None = None
+    ) -> _RowT | None: ...
+
+    def fetchone(
+        self,
+        sql: Sql,
+        params: SqlParams = (),
+        *,
+        row_factory: RowFactory | None = None,
+    ) -> SqlRow | None:
         """Execute a query and return the first result row, or None.
 
         Args:
             sql: The Sql object containing the query.
             params: Parameters to bind to the query.
+            row_factory: Row factory for this query only, defaults to the
+                one given to Db.
         """
-        return self.execute(sql, params).fetchone()
+        return self.execute(sql, params, row_factory=row_factory).fetchone()
 
-    def fetchall(self, sql: Sql, params: SqlParams = ()) -> list[SqlRow]:
+    @overload
+    def fetchall(
+        self, sql: Sql, params: SqlParams = ..., *, row_factory: _TypedRowFactory[_T]
+    ) -> list[_T]: ...
+
+    @overload
+    def fetchall(
+        self, sql: Sql, params: SqlParams = ..., *, row_factory: None = None
+    ) -> list[_RowT]: ...
+
+    def fetchall(
+        self,
+        sql: Sql,
+        params: SqlParams = (),
+        *,
+        row_factory: RowFactory | None = None,
+    ) -> list[SqlRow]:
         """Execute a query and return all result rows.
 
         Args:
             sql: The Sql object containing the query.
             params: Parameters to bind to the query.
+            row_factory: Row factory for this query only, defaults to the
+                one given to Db.
         """
-        return self.execute(sql, params).fetchall()
+        return self.execute(sql, params, row_factory=row_factory).fetchall()
 
     def fetchval(self, sql: Sql, params: SqlParams = ()) -> Any:
         """Execute a query and return the first column of the first row.
@@ -407,21 +544,23 @@ class Db:
         commits on success, otherwise its changes are committed along with
         the surrounding transaction.
 
-        Do not commit inside a block, with commit() or executescript()
-        (sqlite3 commits any open transaction before running a script),
-        it ends the block early and its exit then fails.
+        commit() and executescript() are refused inside a block, as
+        committing would end it early.
         """
         name = f"sqlitey_{self._savepoint_depth}"
         self.conn.execute(f"SAVEPOINT {name}")
         self._savepoint_depth += 1
         try:
             yield self
+            self.conn.execute(f"RELEASE {name}")
         except BaseException:
+            # also reached when the RELEASE itself fails, for example on a
+            # deferred constraint, so the block never leaves changes behind
             self.conn.execute(f"ROLLBACK TO {name}")
+            self.conn.execute(f"RELEASE {name}")
             raise
         finally:
             self._savepoint_depth -= 1
-            self.conn.execute(f"RELEASE {name}")
 
     def migrate(self, directory: Path) -> int:
         """Apply pending SQL migrations and return how many were applied.
@@ -477,6 +616,10 @@ class Db:
         Args:
             sql: The Sql object containing the query.
             params: Parameters to bind to the query.
+
+        Raises:
+            RuntimeError: If called inside a transaction() block.
         """
+        self._forbid_in_transaction_block("commit()")
         self.execute(sql, params)
         self.conn.commit()

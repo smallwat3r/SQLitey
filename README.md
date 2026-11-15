@@ -23,6 +23,7 @@ Requires Python 3.11 or newer.
   - [Transactions](#transactions)
   - [Bulk inserts and scripts](#bulk-inserts-and-scripts)
   - [Pragmas](#pragmas)
+  - [Read-only access](#read-only-access)
   - [Migrations](#migrations)
 - [Things to know](#things-to-know)
 - [API reference](#api-reference)
@@ -37,17 +38,44 @@ pip install sqlitey
 ## Quick start
 
 ```python
-from sqlitey import Db, Sql
+from dataclasses import dataclass
 
-with Db("app.db") as db:
-    db.execute(Sql.raw("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)"))
+from sqlitey import Db, Sql, dataclass_factory
+
+
+@dataclass
+class User:
+    id: int
+    name: str
+
+
+with Db(":memory:") as db:
+    db.execute(Sql.raw("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"))
     db.execute(Sql.raw("INSERT INTO users (name) VALUES (?)"), ("Alice",))
 
-    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE name = ?"), ("Alice",))
-    print(user)  # (1, 'Alice')
+    user = db.fetchone(
+        Sql.raw("SELECT id, name FROM users WHERE name = ?"),
+        ("Alice",),
+        row_factory=dataclass_factory(User),
+    )
+    print(user)  # User(id=1, name='Alice')
 ```
 
-That is all there is to it. When the `with` block ends, your changes are committed and the connection is closed. If an exception is raised inside the block, the changes are rolled back instead.
+When the `with` block ends, your changes are committed and the connection is closed. If an exception is raised inside the block, the changes are rolled back instead. Use a file path such as `"app.db"` instead of `":memory:"` to keep the data.
+
+Queries can also live in their own `.sql` files, and be referred to by filename:
+
+```sql
+-- sql/get_user_by_name.sql
+SELECT id, name FROM users WHERE name = ?
+```
+
+```python
+from pathlib import Path
+
+with Db("app.db", sql_templates_dir=Path("sql")) as db:
+    user = db.fetchone(Sql.template("get_user_by_name.sql"), ("Alice",))
+```
 
 ## Guide
 
@@ -118,7 +146,7 @@ with Db("app.db", row_factory=namedtuple_factory) as db:
     print(user.name)  # 'Alice'
 ```
 
-As your own classes, the column names must match the field names:
+As your own classes, the column names must match the field names. A class fits one shape of row, so pass the factory to the query rather than to `Db`:
 
 ```python
 from dataclasses import dataclass
@@ -129,10 +157,28 @@ class User:
     id: int
     name: str
 
-with Db("app.db", row_factory=dataclass_factory(User)) as db:
-    user = db.fetchone(Sql.raw("SELECT id, name FROM users WHERE id = ?"), (1,))
+@dataclass
+class Order:
+    id: int
+    total: float
+
+with Db("app.db") as db:
+    user = db.fetchone(
+        Sql.raw("SELECT id, name FROM users WHERE id = ?"),
+        (1,),
+        row_factory=dataclass_factory(User),
+    )
     print(user)  # User(id=1, name='Alice')
+
+    orders = db.fetchall(
+        Sql.raw("SELECT id, total FROM orders"),
+        row_factory=dataclass_factory(Order),
+    )
 ```
+
+`execute`, `fetchone` and `fetchall` all accept `row_factory`, with any factory. It applies to that query only and takes precedence over the one given to `Db`.
+
+Row types follow the factory for type checkers too. `user` above is typed as `User | None`, and without a per query factory, rows are typed from the one given to `Db`: tuples by default, `dict[str, Any]` with `dict_factory`.
 
 > **Tip:** with `namedtuple_factory`, a column such as `COUNT(*)` is not a valid attribute name, so it is renamed to its position (`_0`, `_1`, ...). Give it an alias to get a proper name: `SELECT COUNT(*) AS total`.
 
@@ -202,6 +248,8 @@ Other options:
 - `Db("app.db", autocommit=True)` commits every statement as it runs
 - without a `with` block, call `db.close()` yourself when done. Uncommitted changes are discarded, so commit first
 
+`db.commit()` and `db.executescript()` both commit, so they raise `RuntimeError` inside a `db.transaction()` block, where that would break the all-or-nothing guarantee.
+
 ### Bulk inserts and scripts
 
 Run one statement with many sets of parameters:
@@ -238,6 +286,15 @@ with Db("app.db", pragmas={"foreign_keys": True, "cache_size": -8000}) as db:
     ...
 ```
 
+### Read-only access
+
+Open an existing database with `readonly=True` when you only mean to read it, for reports or scripts for example. Any write raises `sqlite3.OperationalError`, and a missing file is an error instead of being created:
+
+```python
+with Db("app.db", readonly=True) as db:
+    total = db.fetchval(Sql.raw("SELECT COUNT(*) FROM users"))
+```
+
 ### Migrations
 
 Keep your schema changes as numbered `.sql` files, named `<version>_<description>.sql`:
@@ -267,7 +324,7 @@ To add a change later, add a new file with the next number. Never edit a migrati
 
 ## Things to know
 
-- **Do not commit inside a `db.transaction()` block.** `db.commit()` and `db.executescript()` both end the transaction early, and the block then fails on exit.
+- **No committing inside a `db.transaction()` block.** `db.commit()` and `db.executescript()` raise `RuntimeError` there. Avoid `db.conn.commit()` in a block too, it cannot be guarded.
 - **`db.migrate()` needs a clean slate.** It raises `RuntimeError` if you have uncommitted changes, call it first.
 - **Migration files must not contain `BEGIN` or `COMMIT`.** Each file already runs in its own transaction.
 - **SQL files are cached.** A file is read once per process, restart to pick up edits.
@@ -286,13 +343,13 @@ To add a change later, add a new file with the next number. Never edit a migrati
 
 | Method | Description |
 |--------|-------------|
-| `Db(database, row_factory=None, sql_templates_dir=None, autocommit=False, pragmas=None)` | Open a database. Extra arguments are passed to `sqlite3.connect()` |
+| `Db(database, row_factory=None, sql_templates_dir=None, autocommit=False, pragmas=None, readonly=False)` | Open a database. Extra arguments are passed to `sqlite3.connect()` |
 | `Db.from_config(config, **kwargs)` | Open a database from a `DbPathConfig` |
-| `execute(sql, params=())` | Run a query and return a cursor |
+| `execute(sql, params=(), row_factory=None)` | Run a query and return a cursor |
 | `executemany(sql, seq_of_params)` | Run a query once per set of parameters |
 | `executescript(sql)` | Run several statements as a script |
-| `fetchone(sql, params=())` | Run a query and return the first row, or `None` |
-| `fetchall(sql, params=())` | Run a query and return all rows |
+| `fetchone(sql, params=(), row_factory=None)` | Run a query and return the first row, or `None` |
+| `fetchall(sql, params=(), row_factory=None)` | Run a query and return all rows |
 | `fetchval(sql, params=())` | Run a query and return the first column of the first row, or `None` |
 | `commit(sql, params=())` | Run a query and commit |
 | `transaction()` | Context manager, runs a block atomically, nestable |
